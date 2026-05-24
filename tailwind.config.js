@@ -18,8 +18,8 @@ module.exports = {
         },
       },
       fontFamily: {
-        display: ["'Fraunces'", "serif"],
-        body: ["'Manrope'", "sans-serif"],
+        display: ["var(--font-display)", "serif"],
+        body: ["var(--font-body)", "sans-serif"],
       },
       boxShadow: {
         card: "0 12px 30px rgba(28, 36, 45, 0.08)",

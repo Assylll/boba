@@ -16,7 +16,8 @@ const HAS_UPSTASH_ENV = Boolean(
   REDIS_REST_URL && REDIS_REST_TOKEN
 );
 const USE_REDIS =
-  STATE_STORAGE === "redis" || (STATE_STORAGE !== "file" && HAS_UPSTASH_ENV);
+  (STATE_STORAGE === "redis" && HAS_UPSTASH_ENV) ||
+  (STATE_STORAGE !== "redis" && STATE_STORAGE !== "file" && HAS_UPSTASH_ENV);
 const STATE_REDIS_KEY =
   process.env.STATE_REDIS_KEY?.trim() || "boba-pos:state:global";
 
@@ -27,6 +28,7 @@ const STATE_FILE = path.join(STATE_DATA_DIR, "state.json");
 
 let updateQueue: Promise<unknown> = Promise.resolve();
 let redisClient: Redis | null = null;
+let hasWarnedMissingRedisEnv = false;
 
 function getRedisClient(): Redis {
   if (redisClient) {
@@ -44,6 +46,10 @@ function getRedisClient(): Redis {
     token: REDIS_REST_TOKEN,
   });
   return redisClient;
+}
+
+function shouldWarnMissingRedisEnv(): boolean {
+  return STATE_STORAGE === "redis" && !HAS_UPSTASH_ENV && !hasWarnedMissingRedisEnv;
 }
 
 async function ensureStateFile(): Promise<void> {
@@ -113,6 +119,13 @@ function logRedisFallback(error: unknown): void {
 }
 
 export async function readState(): Promise<PersistedStoreState> {
+  if (shouldWarnMissingRedisEnv()) {
+    hasWarnedMissingRedisEnv = true;
+    console.error(
+      "STATE_STORAGE=redis is configured, but Redis env vars are missing. Falling back to file storage."
+    );
+  }
+
   if (!USE_REDIS) {
     return readStateFromFile();
   }
@@ -120,15 +133,19 @@ export async function readState(): Promise<PersistedStoreState> {
   try {
     return await readStateFromRedis();
   } catch (error) {
-    if (STATE_STORAGE === "redis") {
-      throw error;
-    }
     logRedisFallback(error);
     return readStateFromFile();
   }
 }
 
 export async function writeState(state: PersistedStoreState): Promise<void> {
+  if (shouldWarnMissingRedisEnv()) {
+    hasWarnedMissingRedisEnv = true;
+    console.error(
+      "STATE_STORAGE=redis is configured, but Redis env vars are missing. Falling back to file storage."
+    );
+  }
+
   if (!USE_REDIS) {
     await writeStateToFile(state);
     return;
@@ -137,9 +154,6 @@ export async function writeState(state: PersistedStoreState): Promise<void> {
   try {
     await writeStateToRedis(state);
   } catch (error) {
-    if (STATE_STORAGE === "redis") {
-      throw error;
-    }
     logRedisFallback(error);
     await writeStateToFile(state);
   }
@@ -148,6 +162,13 @@ export async function writeState(state: PersistedStoreState): Promise<void> {
 export async function updateState(
   mutator: (current: PersistedStoreState) => PersistedStoreState | Promise<PersistedStoreState>
 ): Promise<PersistedStoreState> {
+  if (shouldWarnMissingRedisEnv()) {
+    hasWarnedMissingRedisEnv = true;
+    console.error(
+      "STATE_STORAGE=redis is configured, but Redis env vars are missing. Falling back to file storage."
+    );
+  }
+
   const task = async () => {
     if (!USE_REDIS) {
       const current = await readStateFromFile();
@@ -162,9 +183,6 @@ export async function updateState(
       await writeStateToRedis(next);
       return next;
     } catch (error) {
-      if (STATE_STORAGE === "redis") {
-        throw error;
-      }
       logRedisFallback(error);
       const current = await readStateFromFile();
       const next = normalizePersistedState(await mutator(current));

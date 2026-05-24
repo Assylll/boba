@@ -7,6 +7,7 @@ import { getAdminSession } from "@/server/auth";
 import { updateState } from "@/server/state-db";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const ALLOWED_ACTION_TYPES: PersistedStoreAction["type"][] = [
   "ADD_TO_CART",

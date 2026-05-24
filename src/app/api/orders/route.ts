@@ -5,9 +5,16 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const state = await readState();
-  return NextResponse.json({
-    count: state.orders.length,
-    orders: state.orders,
-  });
+  try {
+    const state = await readState();
+    return NextResponse.json({
+      count: state.orders.length,
+      orders: state.orders,
+    });
+  } catch {
+    return NextResponse.json(
+      { message: "Unable to load orders" },
+      { status: 500 }
+    );
+  }
 }

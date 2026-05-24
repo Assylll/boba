@@ -6,14 +6,21 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const state = await readState();
-  const admin = getAdminSession(request);
+  try {
+    const state = await readState();
+    const admin = getAdminSession(request);
 
-  return NextResponse.json({
-    state,
-    auth: {
-      isAdminAuthenticated: admin.isAuthenticated,
-      adminUsername: admin.username,
-    },
-  });
+    return NextResponse.json({
+      state,
+      auth: {
+        isAdminAuthenticated: admin.isAuthenticated,
+        adminUsername: admin.username,
+      },
+    });
+  } catch {
+    return NextResponse.json(
+      { message: "Unable to load state" },
+      { status: 500 }
+    );
+  }
 }

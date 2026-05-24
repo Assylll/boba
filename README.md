@@ -60,6 +60,7 @@ BOBA_POS_SESSION_SECRET=change_me_long_random_secret
 - `STATE_STORAGE=redis` + `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` -> постоянная БД (рекомендуется для Vercel).
 - Можно использовать эквивалентные переменные Vercel: `KV_REST_API_URL` + `KV_REST_API_TOKEN`.
 - `STATE_STORAGE=file` -> файловая БД `STATE_DATA_DIR/state.json` (удобно локально).
+- Если задан `STATE_STORAGE=redis`, но Redis env отсутствуют/недоступны, приложение автоматически переключится на файловое хранилище и запишет предупреждение в лог.
 
 Если `STATE_STORAGE` не задан, приложение автоматически выбирает Redis при наличии `UPSTASH_*`, иначе файл.
 
@@ -104,5 +105,3 @@ BOBA_POS_SESSION_SECRET=long_random_secret
 2. Установить и запустить QZ Tray на кассовом ПК.
 3. В кассе указать имя принтера (или оставить пусто для принтера по умолчанию).
 4. Нажать `Тест-чек`.
-# boba
-# boba
