@@ -58,6 +58,7 @@ BOBA_POS_SESSION_SECRET=change_me_long_random_secret
 Поддерживаются 2 режима:
 
 - `STATE_STORAGE=redis` + `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` -> постоянная БД (рекомендуется для Vercel).
+- Можно использовать эквивалентные переменные Vercel: `KV_REST_API_URL` + `KV_REST_API_TOKEN`.
 - `STATE_STORAGE=file` -> файловая БД `STATE_DATA_DIR/state.json` (удобно локально).
 
 Если `STATE_STORAGE` не задан, приложение автоматически выбирает Redis при наличии `UPSTASH_*`, иначе файл.
@@ -74,7 +75,7 @@ BOBA_POS_SESSION_SECRET=change_me_long_random_secret
    - `ADMIN_USERNAME`
    - `ADMIN_PASSWORD`
    - `BOBA_POS_SESSION_SECRET`
-   - `UPSTASH_REDIS_REST_URL` и `UPSTASH_REDIS_REST_TOKEN` (обычно подставляются автоматически интеграцией)
+   - `UPSTASH_REDIS_REST_URL` и `UPSTASH_REDIS_REST_TOKEN` (или `KV_REST_API_URL` и `KV_REST_API_TOKEN`)
 5. Запустить deploy.
 6. Если изменили env-переменные, сделать redeploy.
 

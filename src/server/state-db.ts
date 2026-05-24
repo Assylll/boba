@@ -8,8 +8,12 @@ import {
 } from "@/lib/pos-state";
 
 const STATE_STORAGE = (process.env.STATE_STORAGE ?? "").toLowerCase();
+const REDIS_REST_URL =
+  process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
+const REDIS_REST_TOKEN =
+  process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
 const HAS_UPSTASH_ENV = Boolean(
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  REDIS_REST_URL && REDIS_REST_TOKEN
 );
 const USE_REDIS =
   STATE_STORAGE === "redis" || (STATE_STORAGE !== "file" && HAS_UPSTASH_ENV);
@@ -29,13 +33,16 @@ function getRedisClient(): Redis {
     return redisClient;
   }
 
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+  if (!REDIS_REST_URL || !REDIS_REST_TOKEN) {
     throw new Error(
-      "Missing UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN for Redis state storage."
+      "Missing Redis env vars. Set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN, or KV_REST_API_URL + KV_REST_API_TOKEN."
     );
   }
 
-  redisClient = Redis.fromEnv();
+  redisClient = new Redis({
+    url: REDIS_REST_URL,
+    token: REDIS_REST_TOKEN,
+  });
   return redisClient;
 }
 
