@@ -106,3 +106,4 @@ BOBA_POS_SESSION_SECRET=long_random_secret
 3. В кассе указать имя принтера (или оставить пусто для принтера по умолчанию).
 4. Нажать `Тест-чек`.
 # bboobaaaa
+# bboobaaaa
