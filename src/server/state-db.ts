@@ -1,33 +1,49 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { Prisma } from "@prisma/client";
+import { Redis } from "@upstash/redis";
 import {
   createInitialPersistedState,
   normalizePersistedState,
   PersistedStoreState,
 } from "@/lib/pos-state";
-import { prisma } from "@/server/prisma";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const STATE_FILE = path.join(DATA_DIR, "state.json");
-const STATE_ROW_KEY = "global";
-const POSTGRES_LOCK_KEY = 91342001;
 const STATE_STORAGE = (process.env.STATE_STORAGE ?? "").toLowerCase();
-const USE_POSTGRES =
-  STATE_STORAGE === "postgres" ||
-  (STATE_STORAGE !== "file" && Boolean(process.env.DATABASE_URL));
+const HAS_UPSTASH_ENV = Boolean(
+  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+);
+const USE_REDIS =
+  STATE_STORAGE === "redis" || (STATE_STORAGE !== "file" && HAS_UPSTASH_ENV);
+const STATE_REDIS_KEY =
+  process.env.STATE_REDIS_KEY?.trim() || "boba-pos:state:global";
+
+const STATE_DATA_DIR =
+  process.env.STATE_DATA_DIR?.trim() ||
+  (process.env.VERCEL ? "/tmp/boba-pos" : path.join(process.cwd(), "data"));
+const STATE_FILE = path.join(STATE_DATA_DIR, "state.json");
 
 let updateQueue: Promise<unknown> = Promise.resolve();
+let redisClient: Redis | null = null;
 
-function toJsonState(state: PersistedStoreState): Prisma.InputJsonValue {
-  return state as unknown as Prisma.InputJsonValue;
+function getRedisClient(): Redis {
+  if (redisClient) {
+    return redisClient;
+  }
+
+  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+    throw new Error(
+      "Missing UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN for Redis state storage."
+    );
+  }
+
+  redisClient = Redis.fromEnv();
+  return redisClient;
 }
 
 async function ensureStateFile(): Promise<void> {
   try {
     await fs.access(STATE_FILE);
   } catch {
-    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.mkdir(STATE_DATA_DIR, { recursive: true });
     const initial = createInitialPersistedState();
     await fs.writeFile(STATE_FILE, JSON.stringify(initial, null, 2), "utf8");
   }
@@ -47,95 +63,77 @@ async function readStateFromFile(): Promise<PersistedStoreState> {
 }
 
 async function writeStateToFile(state: PersistedStoreState): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.mkdir(STATE_DATA_DIR, { recursive: true });
   await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
 }
 
-async function readStateFromPostgres(): Promise<PersistedStoreState> {
-  const row = await prisma.appState.findUnique({
-    where: { key: STATE_ROW_KEY },
-  });
+function parseRedisState(
+  value: PersistedStoreState | Partial<PersistedStoreState> | string
+): PersistedStoreState {
+  if (typeof value === "string") {
+    try {
+      return normalizePersistedState(
+        JSON.parse(value) as Partial<PersistedStoreState>
+      );
+    } catch {
+      return createInitialPersistedState();
+    }
+  }
 
-  if (!row) {
+  return normalizePersistedState(value as Partial<PersistedStoreState>);
+}
+
+async function readStateFromRedis(): Promise<PersistedStoreState> {
+  const redis = getRedisClient();
+  const value = await redis.get<Partial<PersistedStoreState> | string>(STATE_REDIS_KEY);
+
+  if (!value) {
     const initial = createInitialPersistedState();
-    await prisma.appState.create({
-      data: { key: STATE_ROW_KEY, data: toJsonState(initial) },
-    });
+    await redis.set(STATE_REDIS_KEY, initial);
     return initial;
   }
 
-  return normalizePersistedState(row.data as Partial<PersistedStoreState>);
+  return parseRedisState(value);
 }
 
-async function writeStateToPostgres(state: PersistedStoreState): Promise<void> {
-  await prisma.appState.upsert({
-    where: { key: STATE_ROW_KEY },
-    create: { key: STATE_ROW_KEY, data: toJsonState(state) },
-    update: { data: toJsonState(state) },
-  });
+async function writeStateToRedis(state: PersistedStoreState): Promise<void> {
+  const redis = getRedisClient();
+  await redis.set(STATE_REDIS_KEY, state);
 }
 
-async function updateStateInPostgres(
-  mutator: (current: PersistedStoreState) => PersistedStoreState | Promise<PersistedStoreState>
-): Promise<PersistedStoreState> {
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${POSTGRES_LOCK_KEY})`;
-
-    const row = await tx.appState.findUnique({
-      where: { key: STATE_ROW_KEY },
-    });
-
-    const current = row
-      ? normalizePersistedState(row.data as Partial<PersistedStoreState>)
-      : createInitialPersistedState();
-    const next = normalizePersistedState(await mutator(current));
-
-    await tx.appState.upsert({
-      where: { key: STATE_ROW_KEY },
-      create: { key: STATE_ROW_KEY, data: toJsonState(next) },
-      update: { data: toJsonState(next) },
-    });
-
-    return next;
-  });
-}
-
-function logPostgresFallback(error: unknown): void {
-  console.error(
-    "PostgreSQL state storage failed. Falling back to file storage.",
-    error
-  );
+function logRedisFallback(error: unknown): void {
+  console.error("Redis state storage failed. Falling back to file storage.", error);
 }
 
 export async function readState(): Promise<PersistedStoreState> {
-  if (!USE_POSTGRES) {
+  if (!USE_REDIS) {
     return readStateFromFile();
   }
 
   try {
-    return await readStateFromPostgres();
+    return await readStateFromRedis();
   } catch (error) {
-    if (STATE_STORAGE === "postgres") {
+    if (STATE_STORAGE === "redis") {
       throw error;
     }
-    logPostgresFallback(error);
+    logRedisFallback(error);
     return readStateFromFile();
   }
 }
 
 export async function writeState(state: PersistedStoreState): Promise<void> {
-  if (!USE_POSTGRES) {
+  if (!USE_REDIS) {
     await writeStateToFile(state);
     return;
   }
 
   try {
-    await writeStateToPostgres(state);
+    await writeStateToRedis(state);
   } catch (error) {
-    if (STATE_STORAGE === "postgres") {
+    if (STATE_STORAGE === "redis") {
       throw error;
     }
-    logPostgresFallback(error);
+    logRedisFallback(error);
     await writeStateToFile(state);
   }
 }
@@ -144,7 +142,7 @@ export async function updateState(
   mutator: (current: PersistedStoreState) => PersistedStoreState | Promise<PersistedStoreState>
 ): Promise<PersistedStoreState> {
   const task = async () => {
-    if (!USE_POSTGRES) {
+    if (!USE_REDIS) {
       const current = await readStateFromFile();
       const next = normalizePersistedState(await mutator(current));
       await writeStateToFile(next);
@@ -152,12 +150,15 @@ export async function updateState(
     }
 
     try {
-      return await updateStateInPostgres(mutator);
+      const current = await readStateFromRedis();
+      const next = normalizePersistedState(await mutator(current));
+      await writeStateToRedis(next);
+      return next;
     } catch (error) {
-      if (STATE_STORAGE === "postgres") {
+      if (STATE_STORAGE === "redis") {
         throw error;
       }
-      logPostgresFallback(error);
+      logRedisFallback(error);
       const current = await readStateFromFile();
       const next = normalizePersistedState(await mutator(current));
       await writeStateToFile(next);
